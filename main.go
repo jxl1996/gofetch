@@ -10,6 +10,7 @@ import (
 	"github.com/jxl1996/gofetch/utils"
 	"io"
 	"os"
+	"sync/atomic"
 	"time"
 )
 
@@ -24,13 +25,14 @@ func main() {
 		verbose     bool
 	)
 
-	flag.StringVar(&input, "input", "urls.txt", "URL列表文件 (不指定则读 stdin)")
+	flag.StringVar(&input, "input", "", "URL列表文件 (不指定则读 stdin)")
 	flag.IntVar(&concurrency, "concurrency", 10, "并发请求数")
 	flag.IntVar(&timeout, "timeout", 5, "单请求超时时间")
-	flag.StringVar(&format, "format", "csv", "输出格式: json | jsonl | csv")
+	flag.StringVar(&format, "format", "jsonl", "输出格式: json | jsonl | csv")
 	flag.StringVar(&output, "output", "", "结果写入文件 (不指定则写 stdout)")
 	flag.IntVar(&retry, "retry", 2, "失败后重试次数")
 	flag.BoolVar(&verbose, "verbose", false, "打印进度信息到 stderr")
+	flag.Parse()
 
 	//  准备输入源
 	var reader io.Reader
@@ -68,6 +70,9 @@ func main() {
 		done <- struct{}{}
 	}()
 
+	// 进度信息
+	var processTotal int64
+	var processFinished int64
 	// 创建任务池
 	pool := internal.NewPool(concurrency)
 	// 读取每一行 并提交到任务池
@@ -75,12 +80,18 @@ func main() {
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
 		if urlStr := scanner.Text(); utils.IsValidURL(urlStr) {
+			processTotal++
 			pool.Submit(func() {
 				res := fetcher.FetchWithRetry(urlStr)
 				resultChan <- res
+				if verbose {
+					atomic.AddInt64(&processFinished, 1)
+					fmt.Fprintf(os.Stderr, "已完成: %d/%d \n", processFinished, processTotal)
+				}
 			})
 		}
 	}
+
 	// 等待fetch任务全部执行完毕
 	pool.CloseAndWait()
 	close(resultChan)
