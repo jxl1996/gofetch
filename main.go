@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"encoding/csv"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/jxl1996/gofetch/internal"
@@ -25,7 +27,7 @@ func main() {
 	flag.StringVar(&input, "input", "urls.txt", "URL列表文件 (不指定则读 stdin)")
 	flag.IntVar(&concurrency, "concurrency", 10, "并发请求数")
 	flag.IntVar(&timeout, "timeout", 5, "单请求超时时间")
-	flag.StringVar(&format, "format", "jsonl", "输出格式: json | jsonl | csv")
+	flag.StringVar(&format, "format", "csv", "输出格式: json | jsonl | csv")
 	flag.StringVar(&output, "output", "", "结果写入文件 (不指定则写 stdout)")
 	flag.IntVar(&retry, "retry", 2, "失败后重试次数")
 	flag.BoolVar(&verbose, "verbose", false, "打印进度信息到 stderr")
@@ -44,11 +46,25 @@ func main() {
 		reader = os.Stdin
 	}
 
+	// 准备输出源
+	var writer io.Writer
+	if output != "" {
+		f, err := os.Create(output)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "无法创建输出文件: %v\n", err)
+			os.Exit(1)
+		}
+		defer f.Close()
+		writer = f
+	} else {
+		writer = os.Stdout
+	}
+
 	// 收集结果
 	resultChan := make(chan internal.FetchResult, concurrency)
 	done := make(chan struct{})
 	go func() {
-		writeResult(resultChan)
+		writeResult(resultChan, writer, format)
 		done <- struct{}{}
 	}()
 
@@ -74,8 +90,35 @@ func main() {
 }
 
 // 输出结果
-func writeResult(resultChan chan internal.FetchResult) {
-	for result := range resultChan {
-		fmt.Println(result)
+func writeResult(resultChan chan internal.FetchResult, w io.Writer, format string) {
+	switch format {
+	case "csv":
+		cw := csv.NewWriter(w)
+		defer cw.Flush()
+		cw.Write([]string{"url", "status_code", "latency_ms", "body_size", "error", "timestamp", "attempt"})
+		for r := range resultChan {
+			cw.Write([]string{
+				r.URL,
+				fmt.Sprint(r.StatusCode),
+				fmt.Sprint(r.LatencyMs),
+				fmt.Sprint(r.BodySize),
+				fmt.Sprint(r.Error),
+				fmt.Sprint(r.Timestamp),
+				fmt.Sprint(r.Attempt),
+			})
+		}
+	case "json":
+		var all []internal.FetchResult
+		for r := range resultChan {
+			all = append(all, r)
+		}
+		encoder := json.NewEncoder(w)
+		encoder.SetIndent("", "  ")
+		encoder.Encode(all)
+	default:
+		encoder := json.NewEncoder(w)
+		for r := range resultChan {
+			encoder.Encode(r)
+		}
 	}
 }
