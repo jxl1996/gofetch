@@ -11,7 +11,7 @@ type FetchResult struct {
 	StatusCode int       `json:"status_code"`
 	LatencyMs  int64     `json:"latency_ms"`
 	BodySize   int       `json:"body_size"`
-	Error      error     `json:"error"`
+	Error      string    `json:"error"`
 	Timestamp  time.Time `json:"timestamp"`
 	Attempt    int       `json:"attempt"`
 }
@@ -34,7 +34,7 @@ func NewFetcher(retry int, timeout time.Duration) *Fetcher {
 func (f *Fetcher) FetchWithRetry(urlStr string) (result FetchResult) {
 	for i := 0; i < f.retry; i++ {
 		result = f.doHTTP(urlStr, i)
-		if result.Error == nil {
+		if result.Error == "null" {
 			return result
 		}
 
@@ -58,17 +58,18 @@ func (f *Fetcher) doHTTP(urlStr string, attempt int) (result FetchResult) {
 	result.LatencyMs = time.Since(startTime).Milliseconds()
 	result.Timestamp = time.Now()
 	result.Attempt = attempt + 1
-	result.Error = err
+	result.Error = "null"
 
 	if err == nil {
 		defer resp.Body.Close()
 		result.StatusCode = resp.StatusCode
-
 		if body, err := io.ReadAll(resp.Body); err == nil {
 			result.BodySize = len(body)
 		} else {
-			result.Error = err
+			result.Error = "id read err"
 		}
+	} else {
+		result.Error = "http request err"
 	}
 
 	return result

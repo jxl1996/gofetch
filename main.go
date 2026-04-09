@@ -71,8 +71,10 @@ func main() {
 	}()
 
 	// 进度信息
-	var processTotal int64
-	var processFinished int64
+	var processTotal int32
+	var processFinished int32
+	// 记录失败数量
+	var failCount int32
 	// 创建任务池
 	pool := internal.NewPool(concurrency)
 	// 读取每一行 并提交到任务池
@@ -85,8 +87,11 @@ func main() {
 				res := fetcher.FetchWithRetry(urlStr)
 				resultChan <- res
 				if verbose {
-					atomic.AddInt64(&processFinished, 1)
+					atomic.AddInt32(&processFinished, 1)
 					fmt.Fprintf(os.Stderr, "已完成: %d/%d \n", processFinished, processTotal)
+				}
+				if res.Error != "null" {
+					atomic.AddInt32(&failCount, 1)
 				}
 			})
 		}
@@ -98,6 +103,12 @@ func main() {
 
 	// 等待收集结果完毕
 	<-done
+
+	if failCount == 0 {
+		os.Exit(0)
+	} else {
+		os.Exit(1)
+	}
 }
 
 // 输出结果
@@ -113,7 +124,7 @@ func writeResult(resultChan chan internal.FetchResult, w io.Writer, format strin
 				fmt.Sprint(r.StatusCode),
 				fmt.Sprint(r.LatencyMs),
 				fmt.Sprint(r.BodySize),
-				fmt.Sprint(r.Error),
+				r.Error,
 				fmt.Sprint(r.Timestamp),
 				fmt.Sprint(r.Attempt),
 			})
