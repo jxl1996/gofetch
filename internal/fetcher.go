@@ -6,12 +6,42 @@ import (
 	"time"
 )
 
-func fetch(urlStr string, attempt int) (result FetchResult) {
-	client := &http.Client{}
+type Fetcher struct {
+	client *http.Client
+	retry  int // 失败重试次数
+}
 
+func NewFetcher(retry int, timeout time.Duration) *Fetcher {
+	client := &http.Client{
+		Timeout: timeout,
+	}
+	return &Fetcher{
+		client: client,
+		retry:  retry,
+	}
+}
+
+func (f *Fetcher) FetchWithRetry(urlStr string) (result FetchResult) {
+	for i := 0; i < f.retry; i++ {
+		result = f.doHTTP(urlStr, i)
+		if result.Error == nil {
+			return result
+		}
+
+		if i < f.retry-1 {
+			// 指数退避策略
+			time.Sleep(time.Second * time.Duration(i+1))
+		}
+	}
+
+	// 返回最后一次的失败结果
+	return
+}
+
+func (f *Fetcher) doHTTP(urlStr string, attempt int) (result FetchResult) {
 	// 发起请求
 	startTime := time.Now()
-	resp, err := client.Get(urlStr)
+	resp, err := f.client.Get(urlStr)
 
 	// 整理返回结构
 	result.URL = urlStr
